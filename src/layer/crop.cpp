@@ -13,6 +13,7 @@
 // specific language governing permissions and limitations under the License.
 
 #include "crop.h"
+#include <algorithm>
 
 namespace ncnn {
 
@@ -53,11 +54,47 @@ int Crop::forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) cons
     int h = bottom_blob.h;
     int channels = bottom_blob.c;
 
-    int _outw = outw == -233 ? w - woffset : outw;
-    int _outh = outh == -233 ? h - hoffset : outh;
-    int _outc = outc == -233 ? channels - coffset : outc;
+    int _outw;
+    int _outh;
+    int _outc;
 
-    const Mat bottom_blob_sliced(w, h, _outc, (void*)(const float*)bottom_blob.channel(coffset));
+    if (outw == -233)
+        _outw = w - woffset;
+    else if (outw == -234)
+        _outw = w - 1 - woffset;
+    else
+        _outw = std::min(outw, w - woffset);
+
+    if (outh == -233)
+        _outh = h - hoffset;
+    else if (outh == -234)
+        _outh = h - 1 - hoffset;
+    else
+        _outh = std::min(outh, h - hoffset);
+
+    if (outc == -233)
+        _outc = channels - coffset;
+    else if (outc == -234)
+        _outc = channels - 1 - coffset;
+    else
+        _outc = std::min(outc, channels - coffset);
+
+    if (_outw == w && _outh == h && _outc == channels)
+    {
+        top_blob = bottom_blob;
+        return 0;
+    }
+
+    const Mat bottom_blob_sliced = bottom_blob.channel_range(coffset, _outc);
+
+    if (_outw == w && _outh == h)
+    {
+        top_blob = bottom_blob_sliced.clone();
+        if (top_blob.empty())
+            return -100;
+
+        return 0;
+    }
 
     int top = hoffset;
     int bottom = h - _outh - hoffset;
@@ -80,18 +117,33 @@ int Crop::forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& top_bl
     int h = bottom_blob.h;
     int channels = bottom_blob.c;
 
+    Mat& top_blob = top_blobs[0];
+
     int _outw = reference_blob.w;
     int _outh = reference_blob.h;
     int _outc = reference_blob.dims == 3 ? reference_blob.c : channels;
 
-    const Mat bottom_blob_sliced(w, h, _outc, (void*)(const float*)bottom_blob.channel(coffset));
+    if (_outw == w && _outh == h && _outc == channels)
+    {
+        top_blob = bottom_blob;
+        return 0;
+    }
+
+    const Mat bottom_blob_sliced = bottom_blob.channel_range(coffset, _outc);
+
+    if (_outw == w && _outh == h)
+    {
+        top_blob = bottom_blob_sliced.clone();
+        if (top_blob.empty())
+            return -100;
+
+        return 0;
+    }
 
     int top = hoffset;
     int bottom = h - _outh - hoffset;
     int left = woffset;
     int right = w - _outw - woffset;
-
-    Mat& top_blob = top_blobs[0];
 
     copy_cut_border(bottom_blob_sliced, top_blob, top, bottom, left, right, opt.blob_allocator, opt.num_threads);
     if (top_blob.empty())
@@ -147,9 +199,30 @@ int Crop::forward(const VkMat& bottom_blob, VkMat& top_blob, VkCompute& cmd, con
     // TODO vec and image crop
     int dims = bottom_blob.dims;
 
-    int _outw = outw == -233 ? w - woffset : outw;
-    int _outh = outh == -233 ? h - hoffset : outh;
-    int _outc = outc == -233 ? channels * packing - coffset : outc;
+    int _outw;
+    int _outh;
+    int _outc;
+
+    if (outw == -233)
+        _outw = w - woffset;
+    else if (outw == -234)
+        _outw = w - 1 - woffset;
+    else
+        _outw = std::min(outw, w - woffset);
+
+    if (outh == -233)
+        _outh = h - hoffset;
+    else if (outh == -234)
+        _outh = h - 1 - hoffset;
+    else
+        _outh = std::min(outh, h - hoffset);
+
+    if (outc == -233)
+        _outc = channels * packing - coffset;
+    else if (outc == -234)
+        _outc = channels * packing - 1 - coffset;
+    else
+        _outc = std::min(outc, channels * packing - coffset);
 
     int out_packing = _outc % 4 == 0 ? 4 : 1;
     size_t out_elemsize = elemsize / packing * out_packing;
@@ -197,8 +270,6 @@ int Crop::forward(const VkMat& bottom_blob, VkMat& top_blob, VkCompute& cmd, con
     }
 
     // record
-    cmd.record_prepare_compute_barrier(bottom_blob);
-    cmd.record_prepare_compute_barrier(top_blob);
     cmd.record_pipeline(pipeline, bindings, constants, top_blob);
 
     return 0;
@@ -270,8 +341,6 @@ int Crop::forward(const std::vector<VkMat>& bottom_blobs, std::vector<VkMat>& to
     }
 
     // record
-    cmd.record_prepare_compute_barrier(bottom_blob);
-    cmd.record_prepare_compute_barrier(top_blob);
     cmd.record_pipeline(pipeline, bindings, constants, top_blob);
 
     return 0;

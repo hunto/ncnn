@@ -14,8 +14,6 @@
 
 #include "convolution_arm.h"
 
-#include "benchmark.h"
-
 namespace ncnn {
 
 #include "convolution_1x1.h"
@@ -24,14 +22,11 @@ namespace ncnn {
 #include "convolution_4x4.h"
 #include "convolution_5x5.h"
 #include "convolution_7x7.h"
-
-#if __ARM_NEON
 #include "convolution_sgemm_int8.h"
 #include "convolution_1x1_int8.h"
 #include "convolution_3x3_int8.h"
 #include "convolution_5x5_int8.h"
 #include "convolution_7x7_int8.h"
-#endif // __ARM_NEON
 
 DEFINE_LAYER_CREATOR(Convolution_arm)
 
@@ -76,23 +71,23 @@ int Convolution_arm::load_model(const ModelBin& mb)
             int num_input = weight_data_size / 9 / num_output;
             conv3x3s1_winograd23_transform_kernel_int8_neon(weight_data, weight_3x3_winograd23_int8_data, num_input, num_output);
         }
-        else if (kernel_w == 3 && kernel_h == 3 && dilation_w == 1 && dilation_h == 1 && stride_w == 1 && stride_h == 1)
-        {
-            int num_input = weight_data_size / 9 / num_output;
-            conv3x3s1_transform_kernel_int8_neon(weight_data, weight_3x3s1_int8_data, num_input, num_output);
-        }
 
         if (kernel_w == 3 && kernel_h == 3 && dilation_w == 1 && dilation_h == 1 && stride_w == 2 && stride_h == 2)
         {
             int num_input = weight_data_size / 9 / num_output;
             conv3x3s2_transform_kernel_int8_neon(weight_data, weight_3x3s2_int8_data, num_input, num_output);
         }
-
-        if (kernel_w == 1 && kernel_h == 1 && dilation_w == 1 && dilation_h == 1 && stride_w == 1 && stride_h == 1)
+        else if (kernel_w == 1 && kernel_h == 1 && dilation_w == 1 && dilation_h == 1 && stride_w == 1 && stride_h == 1)
         {
             int num_input = weight_data_size / num_output;
             conv1x1s1_sgemm_transform_kernel_int8_neon(weight_data, weight_1x1s1_sgemm_int8_data, num_input, num_output);
             use_sgemm1x1 = true;
+        }
+        else
+        {
+            int kernel_size = kernel_w * kernel_h;
+            int num_input = weight_data_size / kernel_size / num_output;
+            conv_im2col_sgemm_transform_kernel_int8_neon(weight_data, weight_sgemm_int8_data, num_input, num_output, kernel_size);
         }
         
         return 0;
@@ -299,7 +294,6 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
 
     typedef void (*conv_int8_func)(const Mat&, Mat&, const Mat&, const Option&);
 
-#if __ARM_NEON
     // kernel_size x stride
     conv_int8_func conv_int8_func_table[7][4] =
     {
@@ -346,22 +340,17 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
             0
         }  // kernel_size = 7                
     };
-#endif // __ARM_NEON
 
     conv_func conv = 0;
     conv_int8_func conv_int8 = 0;
 
     if (use_int8_inference)
     {
-#if __ARM_NEON
         conv_int8 = conv_int8_func_table[kernel_size-1][stride-1];
         if (!conv_int8)
         {
             return Convolution::forward(bottom_blob, top_blob, opt);
         }
-#else
-        return Convolution::forward(bottom_blob, top_blob, opt);
-#endif // __ARM_NEON
     }
     else
     {
@@ -454,17 +443,13 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
             {
                 conv3x3s1_winograd23_int8_neon(bottom_blob_bordered, top_blob_tm, weight_3x3_winograd23_int8_data, opt);
             }
-            else if (kernel_w == 3 && kernel_h == 3 && dilation_w == 1 && dilation_h == 1 && stride_w == 1 && stride_h == 1)
-            {
-                conv3x3s1_packed_int8_neon(bottom_blob_bordered, top_blob_tm, weight_3x3s1_int8_data, opt);
-            }
             else if (kernel_w == 3 && kernel_h == 3 && dilation_w == 1 && dilation_h == 1 && stride_w == 2 && stride_h == 2)
             {
                 conv3x3s2_packed_int8_neon(bottom_blob_bordered, top_blob_tm, weight_3x3s2_int8_data, opt);
-            }        
+            }
             else
             {
-                conv_int8(bottom_blob_bordered, top_blob_tm, weight_data, opt);
+                conv_int8(bottom_blob_bordered, top_blob_tm, weight_sgemm_int8_data, opt);
             }
 
             // requantize, reverse scale inplace
@@ -478,7 +463,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
                 Mat top_blob_tm_g = top_blob_tm.channel_range(p, 1);
                 Mat top_blob_g = top_blob.channel_range(p, 1);
                 requantize_ops[p]->forward(top_blob_tm_g, top_blob_g, opt_g);
-            }          
+            }
         }
         else
         {
@@ -494,18 +479,14 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
             {
                 conv3x3s1_winograd23_int8_neon(bottom_blob_bordered, top_blob, weight_3x3_winograd23_int8_data, opt);
             }
-            else if (kernel_w == 3 && kernel_h == 3 && dilation_w == 1 && dilation_h == 1 && stride_w == 1 && stride_h == 1)
-            {
-                conv3x3s1_packed_int8_neon(bottom_blob_bordered, top_blob, weight_3x3s1_int8_data, opt);
-            }
             else if (kernel_w == 3 && kernel_h == 3 && dilation_w == 1 && dilation_h == 1 && stride_w == 2 && stride_h == 2)
             {
                 conv3x3s2_packed_int8_neon(bottom_blob_bordered, top_blob, weight_3x3s2_int8_data, opt);
-            }        
+            }
             else
             {
-                conv_int8(bottom_blob_bordered, top_blob, weight_data, opt);
-            }          
+                conv_int8(bottom_blob_bordered, top_blob, weight_sgemm_int8_data, opt);
+            }
 
             // dequantize, reverse scale inplace
             #pragma omp parallel for num_threads(opt.num_threads)
@@ -517,7 +498,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
 
                 Mat top_blob_g = top_blob.channel_range(p, 1);
                 dequantize_ops[p]->forward_inplace(top_blob_g, opt_g);
-            }           
+            }
         } 
 
         return 0;

@@ -82,6 +82,12 @@ int ConvolutionDepthWise::load_param(const ParamDict& pd)
     group = pd.get(7, 1);
     int8_scale_term = pd.get(8, 0);
 
+    if (pad_w == -233 && pad_h == -233)
+    {
+        // TODO
+        support_vulkan = false;
+    }
+
     use_int8_inference = pd.use_int8_inference;
 
     if (num_output % group != 0)
@@ -1189,8 +1195,6 @@ int ConvolutionDepthWise::forward(const VkMat& bottom_blob, VkMat& top_blob, VkC
         const Pipeline* pipeline = packing == 4 ? pipeline_convolutiondepthwise_pack4 : pipeline_convolutiondepthwise;
 
         // record
-        cmd.record_prepare_compute_barrier(bottom_blob_bordered);
-        cmd.record_prepare_compute_barrier(top_blob);
         cmd.record_pipeline(pipeline, bindings, constants, top_blob);
 
         return 0;
@@ -1272,8 +1276,6 @@ int ConvolutionDepthWise::forward(const VkMat& bottom_blob, VkMat& top_blob, VkC
     }
 
     // record
-    cmd.record_prepare_compute_barrier(bottom_blob_bordered_unpacked);
-    cmd.record_prepare_compute_barrier(top_blob_unpacked);
     cmd.record_pipeline(pipeline, bindings, constants, top_blob_unpacked);
 
     // packing

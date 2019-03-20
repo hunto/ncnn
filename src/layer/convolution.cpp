@@ -77,6 +77,12 @@ int Convolution::load_param(const ParamDict& pd)
     weight_data_size = pd.get(6, 0);
     int8_scale_term = pd.get(8, 0);
 
+    if (pad_w == -233 && pad_h == -233)
+    {
+        // TODO
+        support_vulkan = false;
+    }
+
     use_int8_inference = pd.use_int8_inference;
 
     if (int8_scale_term == 0)
@@ -958,8 +964,6 @@ int Convolution::forward(const VkMat& bottom_blob, VkMat& top_blob, VkCompute& c
             }
 
             // record
-            cmd.record_prepare_compute_barrier(bottom_blob);
-            cmd.record_prepare_compute_barrier(top_blob);
             cmd.record_pipeline(pipeline, bindings, constants, top_blob);
 
             return 0;
@@ -1017,9 +1021,6 @@ int Convolution::forward(const VkMat& bottom_blob, VkMat& top_blob, VkCompute& c
     }
 
     // record
-    cmd.record_prepare_compute_barrier(bottom_blob_bordered);
-    cmd.record_prepare_compute_barrier(top_blob);
-
     if (packing == 1 && out_packing == 1 && kernel_w == 1 && kernel_h == 1 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
     {
         std::vector<vk_constant_type> constants(8);
